@@ -59,7 +59,7 @@ class Account(KBEngine.Proxy):
 		CLIENT_TYPE_BOTS				= 6,	// bots
 		CLIENT_TYPE_MINI				= 7,	// 微型客户端
 		"""
-		spaceUType = GlobalConst.g_demoMaps.get(self.getClientDatas(), 1)
+		spaceUType = GlobalConst.g_demoMaps.get(self.getClientDatas()[0], 1)
 		
 		# 如果是机器人登陆，随机扔进一个场景
 		if self.getClientType() == 6:
@@ -80,7 +80,7 @@ class Account(KBEngine.Proxy):
 			"position"			: spaceData.get("spawnPos", (0,0,0))
 			}
 			
-		avatar = KBEngine.createBaseLocally('Avatar', props)
+		avatar = KBEngine.createEntityLocally('Avatar', props)
 		if avatar:
 			avatar.writeToDB(self._onAvatarSaved)
 		
@@ -100,7 +100,21 @@ class Account(KBEngine.Proxy):
 				break
 		
 		self.client.onRemoveAvatar(found)
-					
+		
+	def reqRemoveAvatarDBID(self, dbid):
+		"""
+		exposed.
+		客户端请求删除一个角色
+		"""
+		DEBUG_MSG("Account[%i].reqRemoveAvatar: %s" % (self.id, dbid))
+		found = 0
+		
+		if dbid in self.characters:
+			del self.characters[dbid]
+			found = dbid
+
+		self.client.onRemoveAvatar(found)
+
 	def selectAvatarGame(self, dbid):
 		"""
 		exposed.
@@ -113,9 +127,9 @@ class Account(KBEngine.Proxy):
 				self.lastSelCharacter = dbid
 				# 由于需要从数据库加载角色，因此是一个异步过程，加载成功或者失败会调用__onAvatarCreated接口
 				# 当角色创建好之后，account会调用giveClientTo将客户端控制权（可理解为网络连接与某个实体的绑定）切换到Avatar身上，
-				# 之后客户端各种输入输出都通过服务器上这个Avatar来代理，任何proxy实体获得控制权都会调用onEntitiesEnabled
-				# Avatar继承了Teleport，Teleport.onEntitiesEnabled会将玩家创建在具体的场景中
-				KBEngine.createBaseFromDBID("Avatar", dbid, self.__onAvatarCreated)
+				# 之后客户端各种输入输出都通过服务器上这个Avatar来代理，任何proxy实体获得控制权都会调用onClientEnabled
+				# Avatar继承了Teleport，Teleport.onClientEnabled会将玩家创建在具体的场景中
+				KBEngine.createEntityFromDBID("Avatar", dbid, self.__onAvatarCreated)
 			else:
 				ERROR_MSG("Account[%i]::selectAvatarGame: not found dbid(%i)" % (self.id, dbid))
 		else:
@@ -124,13 +138,13 @@ class Account(KBEngine.Proxy):
 	#--------------------------------------------------------------------------------------------
 	#                              Callbacks
 	#--------------------------------------------------------------------------------------------
-	def onEntitiesEnabled(self):
+	def onClientEnabled(self):
 		"""
 		KBEngine method.
 		该entity被正式激活为可使用， 此时entity已经建立了client对应实体， 可以在此创建它的
 		cell部分。
 		"""
-		INFO_MSG("Account[%i]::onEntitiesEnabled:entities enable. mailbox:%s, clientType(%i), clientDatas=(%s), hasAvatar=%s, accountName=%s" % \
+		INFO_MSG("Account[%i]::onClientEnabled:entities enable. entityCall:%s, clientType(%i), clientDatas=(%s), hasAvatar=%s, accountName=%s" % \
 			(self.id, self.client, self.getClientType(), self.getClientDatas(), self.activeAvatar, self.__ACCOUNT_NAME__))
 			
 	def onLogOnAttempt(self, ip, port, password):
@@ -153,7 +167,9 @@ class Account(KBEngine.Proxy):
 		# 那么会踢掉之前的客户端连接
 		# 那么此时self.activeAvatar可能不为None， 常规的流程是销毁这个角色等新客户端上来重新选择角色进入
 		if self.activeAvatar:
-			self.activeAvatar.giveClientTo(self)
+			if self.activeAvatar.client is not None:
+				self.activeAvatar.giveClientTo(self)
+
 			self.relogin = time.time()
 			self.activeAvatar.destroySelf()
 			self.activeAvatar = None
@@ -172,6 +188,23 @@ class Account(KBEngine.Proxy):
 		DEBUG_MSG("Account[%i].onClientDeath:" % self.id)
 		self.destroy()		
 		
+	def onDestroy(self):
+		"""
+		KBEngine method.
+		entity销毁
+		"""
+		DEBUG_MSG("Account::onDestroy: %i." % self.id)
+		
+		if self.activeAvatar:
+			self.activeAvatar.accountEntity = None
+
+			try:
+				self.activeAvatar.destroySelf()
+			except:
+				pass
+				
+			self.activeAvatar = None
+			
 	def __onAvatarCreated(self, baseRef, dbid, wasActive):
 		"""
 		选择角色进入游戏时被调用
@@ -226,8 +259,10 @@ class Account(KBEngine.Proxy):
 			avatarinfo[2] = avatar.roleType
 			avatarinfo[3] = 1
 			self.writeToDB()
+		else:
+			avatarinfo[1] = "创建失败了"
 
-			avatar.destroy()
+		avatar.destroy()
 		
 		if self.client:
 			self.client.onCreateAvatarResult(0, avatarinfo)

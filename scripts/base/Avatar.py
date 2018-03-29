@@ -28,15 +28,19 @@ class Avatar(KBEngine.Proxy,
 		
 		self._destroyTimer = 0
 
-	def onEntitiesEnabled(self):
+	def onClientEnabled(self):
 		"""
 		KBEngine method.
 		该entity被正式激活为可使用， 此时entity已经建立了client对应实体， 可以在此创建它的
 		cell部分。
 		"""
-		INFO_MSG("Avatar[%i-%s] entities enable. spaceUTypeB=%s, mailbox:%s" % (self.id, self.nameB, self.spaceUTypeB, self.client))
-		Teleport.onEntitiesEnabled(self)
+		INFO_MSG("Avatar[%i-%s] entities enable. spaceUTypeB=%s, entityCall:%s" % (self.id, self.nameB, self.spaceUTypeB, self.client))
+		Teleport.onClientEnabled(self)
 		
+		if self._destroyTimer > 0:
+			self.delTimer(self._destroyTimer)
+			self._destroyTimer = 0
+
 	def onGetCell(self):
 		"""
 		KBEngine method.
@@ -65,14 +69,13 @@ class Avatar(KBEngine.Proxy,
 		# 如果帐号ENTITY存在 则也通知销毁它
 		if self.accountEntity != None:
 			if time.time() - self.accountEntity.relogin > 1:
-				self.accountEntity.activeAvatar = None
 				self.accountEntity.destroy()
-				self.accountEntity = None
 			else:
 				DEBUG_MSG("Avatar[%i].destroySelf: relogin =%i" % (self.id, time.time() - self.accountEntity.relogin))
 				
 		# 销毁base
-		self.destroy()
+		if not self.isDestroyed:
+			self.destroy()
 
 	#--------------------------------------------------------------------------------------------
 	#                              Callbacks
@@ -96,7 +99,7 @@ class Avatar(KBEngine.Proxy,
 		DEBUG_MSG("Avatar[%i].onClientDeath:" % self.id)
 		# 防止正在请求创建cell的同时客户端断开了， 我们延时一段时间来执行销毁cell直到销毁base
 		# 这段时间内客户端短连接登录则会激活entity
-		self._destroyTimer = self.addTimer(1, 0, SCDefine.TIMER_TYPE_DESTROY)
+		self._destroyTimer = self.addTimer(10, 0, SCDefine.TIMER_TYPE_DESTROY)
 			
 	def onClientGetCell(self):
 		"""
@@ -108,6 +111,17 @@ class Avatar(KBEngine.Proxy,
 	def onDestroyTimer(self):
 		DEBUG_MSG("Avatar::onDestroyTimer: %i" % (self.id))
 		self.destroySelf()
+		
+	def onDestroy(self):
+		"""
+		KBEngine method.
+		entity销毁
+		"""
+		DEBUG_MSG("Avatar::onDestroy: %i." % self.id)
+		
+		if self.accountEntity != None:
+			self.accountEntity.activeAvatar = None
+			self.accountEntity = None
 
 
 
